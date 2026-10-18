@@ -18,10 +18,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentCaptor;
 import org.springframework.amqp.core.MessageProperties;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.amqp.support.converter.MessageConverter;
 
 /** Compila una selección explícita del productor local, sin arrancar Spring ni usar su configuración privada. */
 @EnabledIfSystemProperty(named = "notifications.contract.competition-source", matches = ".+")
@@ -30,7 +27,8 @@ class CompetitionProducerContractTest {
     private static final List<String> SOURCES = List.of(
             "config/RabbitConfig.java", "messaging/ResultRegisteredEnvelope.java",
             "messaging/ResultRegisteredMessage.java", "messaging/ResultEventPublisher.java",
-            "messaging/AfterCommitSender.java", "model/Match.java", "model/Competition.java",
+            "messaging/OutboxEventWriter.java", "model/OutboxMessage.java",
+            "repository/OutboxMessageRepository.java", "model/Match.java", "model/Competition.java",
             "model/Enrollment.java", "model/enums/MatchRound.java", "model/enums/MatchStatus.java",
             "model/enums/CompetitionStatus.java", "model/enums/CompetitionType.java");
 
@@ -58,7 +56,7 @@ class CompetitionProducerContractTest {
 
     @ParameterizedTest
     @ValueSource(ints = {1, 2})
-    void publisherAndConverterProduceAnAcceptedMessage(int version) throws Exception {
+    void publisherAndOutboxProduceAnAcceptedMessage(int version) throws Exception {
         try (var loader = new URLClassLoader(new java.net.URL[] {classes.toUri().toURL()}, getClass().getClassLoader())) {
             Object match = instance(loader, "model.Match");
             set(match, "Id", Long.class, 900101L);
@@ -83,26 +81,32 @@ class CompetitionProducerContractTest {
             set(away, "TeamName", String.class, "Pumas");
             set(away, "InstitutionId", Long.class, 7L);
 
-            var template = mock(RabbitTemplate.class);
-            Class<?> senderType = loader.loadClass("com.athenet.competition.messaging.AfterCommitSender");
-            Object sender = senderType.getConstructor(RabbitTemplate.class).newInstance(template);
+            Class<?> senderType = loader.loadClass("com.athenet.competition.messaging.OutboxEventWriter");
+            Class<?> repositoryType = loader.loadClass("com.athenet.competition.repository.OutboxMessageRepository");
+            Object repository = mock(repositoryType);
+            Object config = instance(loader, "config.RabbitConfig");
+            var mapperMethod = config.getClass().getDeclaredMethod("rabbitObjectMapper");
+            mapperMethod.setAccessible(true);
+            var producerMapper = (com.fasterxml.jackson.databind.ObjectMapper) mapperMethod.invoke(config);
+            Object sender = senderType.getConstructor(repositoryType,com.fasterxml.jackson.databind.ObjectMapper.class)
+                    .newInstance(repository,producerMapper);
             Class<?> publisherType = loader.loadClass("com.athenet.competition.messaging.ResultEventPublisher");
             Object publisher = publisherType.getConstructor(senderType).newInstance(sender);
             Instant before = Instant.now();
             publisherType.getMethod("publish", match.getClass(), competition.getClass(), home.getClass(), away.getClass())
                     .invoke(publisher, match, competition, home, away);
-            var payload = ArgumentCaptor.forClass(Object.class);
-            verify(template).convertAndSend(eq(RabbitConfig.EXCHANGE), eq(RabbitConfig.ROUTING_KEY), payload.capture());
-            verifyNoMoreInteractions(template);
-
-            Object config = instance(loader, "config.RabbitConfig");
-            var mapperMethod = config.getClass().getDeclaredMethod("rabbitObjectMapper");
-            mapperMethod.setAccessible(true);
-            var converterMethod = config.getClass().getDeclaredMethod("jsonMessageConverter",
-                    com.fasterxml.jackson.databind.ObjectMapper.class);
-            converterMethod.setAccessible(true);
-            var converter = (MessageConverter) converterMethod.invoke(config, mapperMethod.invoke(config));
-            var message = converter.toMessage(payload.getValue(), new MessageProperties());
+            var calls = mockingDetails(repository).getInvocations();
+            assertThat(calls).hasSize(1);
+            var call = calls.iterator().next();
+            assertThat(call.getMethod().getName()).isEqualTo("save");
+            Object stored = call.getArgument(0);
+            String payload = (String) stored.getClass().getMethod("getPayload").invoke(stored);
+            assertThat(stored.getClass().getMethod("getRoutingKey").invoke(stored)).isEqualTo(RabbitConfig.ROUTING_KEY);
+            var properties = new MessageProperties();
+            properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+            properties.setContentEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
+            var message = new org.springframework.amqp.core.Message(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8),properties);
+            assertThat(message.getMessageProperties().getHeaders()).doesNotContainKey("__TypeId__");
             CompetitionResultContractTest.assertAccepted(message, version);
             var tree = new ApplicationConfig().rabbitObjectMapper().readTree(message.getBody());
             assertThat(Instant.parse(tree.path("occurredAt").asText())).isBetween(before, Instant.now());
@@ -111,11 +115,11 @@ class CompetitionProducerContractTest {
             Path output = Path.of("target/contracts/competition");
             Files.createDirectories(output);
             Files.write(output.resolve("result-v" + version + ".json"), message.getBody());
-            var properties = message.getMessageProperties();
+            var capturedProperties = message.getMessageProperties();
             new ApplicationConfig().rabbitObjectMapper().writerWithDefaultPrettyPrinter().writeValue(
                     output.resolve("result-v" + version + "-properties.json").toFile(),
-                    Map.of("contentType", properties.getContentType(), "contentEncoding", properties.getContentEncoding(),
-                            "headers", properties.getHeaders()));
+                    Map.of("contentType", capturedProperties.getContentType(), "contentEncoding", capturedProperties.getContentEncoding(),
+                            "headers", capturedProperties.getHeaders()));
         }
     }
 

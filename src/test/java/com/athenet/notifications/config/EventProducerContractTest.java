@@ -32,7 +32,8 @@ class EventProducerContractTest {
                 System.getProperty("java.class.path"), "-processor", "lombok.launch.AnnotationProcessorHider$AnnotationProcessor",
                 "-d", classes.toString()));
         for (String name : List.of("config/RabbitConfig.java", "messaging/EventNotificationData.java",
-                "messaging/EventNotificationEnvelope.java", "messaging/EventNotificationPublisher.java",
+                "messaging/EventNotificationEnvelope.java", "messaging/EventPublishedPublisher.java", "messaging/OutboxEventWriter.java",
+                "repository/OutboxMessageRepository.java", "model/OutboxMessage.java",
                 "model/Event.java", "model/EventType.java", "model/EventStatus.java")) {
             var file = root.resolve(name); assertThat(file).isRegularFile(); args.add(file.toString());
         }
@@ -76,15 +77,28 @@ class EventProducerContractTest {
             Object config = loader.loadClass("com.athenet.events.config.RabbitConfig").getConstructor().newInstance();
             var mapperMethod = config.getClass().getDeclaredMethod("rabbitObjectMapper"); mapperMethod.setAccessible(true);
             var producerMapper = (com.fasterxml.jackson.databind.ObjectMapper) mapperMethod.invoke(config);
-            var rabbit = mock(RabbitTemplate.class);
-            var publisherType = loader.loadClass("com.athenet.events.messaging.EventNotificationPublisher");
-            Object publisher = publisherType.getConstructor(RabbitTemplate.class, com.fasterxml.jackson.databind.ObjectMapper.class,
-                    boolean.class).newInstance(rabbit, producerMapper, true);
+            var writerType = loader.loadClass("com.athenet.events.messaging.OutboxEventWriter");
+            var repositoryType = loader.loadClass("com.athenet.events.repository.OutboxMessageRepository");
+            Object repository = mock(repositoryType);
+            when(repositoryType.getMethod("lastRevision",String.class).invoke(repository,"EVT-CONTRACT-1"))
+                    .thenReturn(type.endsWith("publicado") ? 0L : type.endsWith("modificado") ? 1L : 2L);
+            Object writer = writerType.getConstructor(repositoryType,com.fasterxml.jackson.databind.ObjectMapper.class)
+                    .newInstance(repository,producerMapper);
+            var publisherType = loader.loadClass("com.athenet.events.messaging.EventPublishedPublisher");
+            Object publisher = publisherType.getConstructor(writerType, repositoryType).newInstance(writer, repository);
             publisherType.getMethod("changed", dataType, entityType, boolean.class).invoke(publisher, before, event, false);
-            var message = ArgumentCaptor.forClass(Message.class);
-            verify(rabbit).send(eq(RabbitConfig.EXCHANGE), eq(type), message.capture());
+            var calls = mockingDetails(repository).getInvocations().stream()
+                    .filter(invocation -> invocation.getMethod().getName().equals("save")).toList();
+            assertThat(calls).hasSize(1);
+            var call = calls.getFirst();
+            Object stored = call.getArgument(0);
+            assertThat(stored.getClass().getMethod("getRoutingKey").invoke(stored)).isEqualTo(type);
+            String payload = (String) stored.getClass().getMethod("getPayload").invoke(stored);
+            var properties = new org.springframework.amqp.core.MessageProperties();
+            properties.setContentType("application/json"); properties.setContentEncoding("UTF-8");
+            var message = new Message(payload.getBytes(java.nio.charset.StandardCharsets.UTF_8),properties);
             var service = mock(EventNotificationService.class);
-            new EventNoticeListener(new ApplicationConfig().rabbitObjectMapper(), validators.getValidator(), service).receive(message.getValue());
+            new EventNoticeListener(new ApplicationConfig().rabbitObjectMapper(), validators.getValidator(), service).receive(message);
             var accepted = ArgumentCaptor.forClass(EventNoticeEnvelope.class);
             verify(service).accept(accepted.capture(), any(Instant.class));
             assertThat(accepted.getValue().type()).isEqualTo(type);
@@ -92,10 +106,9 @@ class EventProducerContractTest {
             assertThat(accepted.getValue().data().sporting()).isTrue();
             assertThat(accepted.getValue().data().title()).isEqualTo("Jornada de pista");
             assertThat(accepted.getValue().data().official()).isFalse();
-            assertThat(message.getValue().getMessageProperties().getHeaders()).containsEntry("__TypeId__",
-                    "com.athenet.events.messaging.EventNotificationEnvelope");
+            assertThat(message.getMessageProperties().getHeaders()).doesNotContainKey("__TypeId__");
             var output = Path.of("target/contracts/events"); Files.createDirectories(output);
-            Files.write(output.resolve(type + ".json"), message.getValue().getBody());
+            Files.write(output.resolve(type + ".json"), message.getBody());
         }
     }
 

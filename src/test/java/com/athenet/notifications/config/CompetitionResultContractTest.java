@@ -46,8 +46,8 @@ class CompetitionResultContractTest {
         assertThat(envelope.path("data").has("simulated")).isFalse();
         assertThat(message.getMessageProperties().getContentType()).isEqualTo("application/json");
         assertThat(message.getMessageProperties().getContentEncoding()).isEqualToIgnoringCase(StandardCharsets.UTF_8.name());
-        assertThat(message.getMessageProperties().getHeaders()).containsEntry("__TypeId__",
-                "com.athenet.competition.messaging.ResultRegisteredEnvelope");
+        // Las muestras históricas llevan __TypeId__; la outbox actual envía JSON sin ese header.
+        // El listener debe aceptar ambos sin resolver clases del productor.
 
         var service = mock(ResultNotificationService.class);
         try (var validators = Validation.buildDefaultValidatorFactory()) {
