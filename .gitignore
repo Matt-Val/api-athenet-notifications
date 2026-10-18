@@ -1,0 +1,17 @@
+target/
+.env
+.env.*
+!.env.example
+application-local.properties
+.idea/
+.vscode/
+*.iml
+*.pem
+*.key
+.attach_pid*
+__pycache__/
+*.pyc
+.mvn/wrapper/maven-wrapper.jar
+/docs/
+/db/
+/scripts/
