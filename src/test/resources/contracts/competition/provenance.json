@@ -1,0 +1,21 @@
+{
+  "producer": "api-athenet-competition",
+  "capturedOn": "2026-10-17",
+  "exchange": "athenet.topic",
+  "routingKey": "resultado.registrado",
+  "method": "ResultEventPublisher + AfterCommitSender (RabbitTemplate mock) + RabbitConfig.jsonMessageConverter; sin broker",
+  "sha256": {
+    "config/RabbitConfig.java": "50b6e86389819d7717320231adda2ee3de1cefb2b52c3e559e9a78efb4d29889",
+    "messaging/ResultRegisteredEnvelope.java": "9900c1fae367650f8b2c00681e24ac5b75815139982c1f285b6e2c863e183fed",
+    "messaging/ResultRegisteredMessage.java": "9f1246630184b8d7cd89a59093cd2447b4727670eff8cc7bbafca61489c696f0",
+    "messaging/ResultEventPublisher.java": "9661bf4857012137c029a8a2ba514ecc66c5b8f389e08676efe8407e2d6434c8",
+    "messaging/AfterCommitSender.java": "0ebf10c094aa2bb86611d5b8a2f6f300047908a966391ae349ea0157145fb271",
+    "model/Match.java": "58f3e51795cdaae1bc3fea8bbbc433d9372a2a43600eab953b65f5ce56878e5c",
+    "model/Competition.java": "c1c0c8eece162043dd3bd387a0b9c86e827adf1d74e193b885125390058862fa",
+    "model/Enrollment.java": "f4cbc399f620596e369bd61faea43989f62a2beaf7e10202d70f4dbb54a9af34",
+    "model/enums/MatchRound.java": "851628a049ed97c6345c973296a75090371d81ca63f38440c61c77c6cb97c250",
+    "model/enums/MatchStatus.java": "e903a43caf53905c6892304863cc82523e1592bf8a5b77bcecb04dee765ce680",
+    "model/enums/CompetitionStatus.java": "56d95e29b72d172d8770504e7e5300bbda32762b196828a8614c4f1b1cb3e9f7",
+    "model/enums/CompetitionType.java": "744d7395c6e94e4b38649f506c5a539b19048db8a28cdcab2591343e6613aff5"
+  }
+}
