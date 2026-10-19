@@ -34,27 +34,27 @@ jobs:
       - run: chmod +x mvnw && ./mvnw -B verify
 
   build-and-push:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
     outputs:
       image: ${{ steps.image.outputs.name }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set lowercase image name
+      - name: Set Docker Hub image name
         id: image
         env:
-          REPOSITORY: ${{ github.repository }}
-        run: echo "name=ghcr.io/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          : "${DOCKERHUB_USERNAME:?Configura la variable DOCKERHUB_USERNAME}"
+          echo "name=${DOCKERHUB_USERNAME}/api-athenet-notifications" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -66,7 +66,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build-and-push
     runs-on: ubuntu-latest
     concurrency:
@@ -74,7 +74,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@v4
       - name: Copy Compose configuration to EC2
@@ -89,14 +88,14 @@ jobs:
       - name: Deploy to EC2
         uses: appleboy/ssh-action@v1
         env:
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           IMAGE_REF: ${{ needs.build-and-push.outputs.image }}:${{ github.sha }}
         with:
           host: ${{ secrets.EC2_APP_HOST }}
           username: ${{ secrets.EC2_SSH_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: GHCR_USER,GHCR_TOKEN,IMAGE_REF
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,IMAGE_REF
           command_timeout: 10m
           script: |
             set -eu
@@ -104,8 +103,8 @@ jobs:
             test -s deploy/.env
             export NOTIFICATIONS_IMAGE="$IMAGE_REF"
             export NOTIFICATIONS_BIND_ADDRESS=0.0.0.0
-            printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            unset GHCR_TOKEN
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            unset DOCKERHUB_TOKEN
             docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml config --quiet
             docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml pull notifications
             docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml up -d --no-build notifications
