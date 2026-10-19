@@ -1,0 +1,33 @@
+name: athenet-notifications-local
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: notifications_db
+      POSTGRES_USER: notifications_user
+      POSTGRES_PASSWORD: notifications_dev
+    ports: ["127.0.0.1:5434:5432"]
+    volumes: ["notifications_db:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notifications_user -d notifications_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: notifications_dev
+      RABBITMQ_DEFAULT_PASS: notifications_dev
+    ports: ["127.0.0.1:5673:5672", "127.0.0.1:15673:15672"]
+    volumes: ["notifications_rabbitmq:/var/lib/rabbitmq"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  mailpit:
+    image: axllent/mailpit:v1.27.4
+    ports: ["127.0.0.1:1025:1025", "127.0.0.1:8025:8025"]
+volumes:
+  notifications_db:
+  notifications_rabbitmq:
