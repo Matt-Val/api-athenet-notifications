@@ -1,0 +1,7 @@
+{
+  "contentEncoding" : "UTF-8",
+  "contentType" : "application/json",
+  "headers" : {
+    "__TypeId__" : "com.athenet.competition.messaging.ResultRegisteredEnvelope"
+  }
+}
