@@ -63,3 +63,7 @@ Este cambio no agrega una migración propia de Notificaciones. El esquema debe e
 Configurar conexión a su esquema, RabbitMQ/vhost, SMTP, remitente y URLs públicas. Para probar localmente se usó Mailpit; esos valores y sus contraseñas de desarrollo no corresponden a producción. Mantener activos publicadores y worker. Habilitar `NEWSLETTER_EVENTS_ENABLED=true` cuando se quieran procesar avisos deportivos.
 
 Los consumidores deben usar el mismo exchange/vhost que los productores, con colas independientes. No copiar tokens ni credenciales privadas al ZIP. No se desplegó SMTP de producción ni se acredita entrega exactamente una vez: una caída posterior a la aceptación SMTP y anterior a guardar SENT puede producir duplicación.
+
+## Docker Hub — 2026-10-19
+
+Se preparó la publicación de imágenes en Docker Hub y el despliegue por SSH usando la etiqueta SHA. Las credenciales del registro se configuran mediante `DOCKERHUB_USERNAME` (variable) y `DOCKERHUB_TOKEN` (secret). La preparación no incluye publicación ni despliegue ejecutados.

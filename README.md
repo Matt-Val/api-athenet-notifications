@@ -22,7 +22,7 @@ set +a
 
 `feature/*` → PR a `develop` → PR a `main`.
 
-El workflow `.github/workflows/ci.yml` ejecuta las pruebas en los PR y pushes a main/develop. Solo un push a main publica la imagen en GHCR y despliega en EC2. Las pruebas de PostgreSQL usan una base temporal del runner.
+El workflow `.github/workflows/ci.yml` ejecuta las pruebas en los PR y pushes a main/develop. Un push a main o una ejecución manual en main publica la imagen en Docker Hub y despliega en EC2. Las pruebas de PostgreSQL usan una base temporal del runner.
 
 Configurar estos secretos en GitHub Actions:
 
@@ -30,7 +30,7 @@ Configurar estos secretos en GitHub Actions:
 - `EC2_SSH_USER`: `ec2-user`.
 - `EC2_SSH_KEY`: contenido de la clave privada SSH de esa instancia.
 
-El despliegue necesita Docker, Compose y acceso SSH desde el runner. Usa el directorio `~/api-athenet-notifications` y conserva `deploy/.env`, configurado previamente en la EC2. Las credenciales de RDS, RabbitMQ, Gmail y Turnstile permanecen en ese archivo. El token de GHCR lo proporciona GitHub Actions automáticamente.
+El despliegue necesita Docker, Compose y acceso SSH desde el runner. Usa el directorio `~/api-athenet-notifications` y conserva `deploy/.env`, configurado previamente en la EC2. Las credenciales de RDS, RabbitMQ, Gmail y Turnstile permanecen en ese archivo. Configurar la variable `DOCKERHUB_USERNAME` y el secret `DOCKERHUB_TOKEN` para acceder al registro.
 
 Los archivos de `deploy/` mantienen el despliegue Compose existente y esquema `validate`; las migraciones se aplican manualmente antes de desplegar cambios que las requieran. El despliegue comprueba HTTP local, sin acreditar por sí solo entrega de correos. No se configura reversión automática ante un fallo.
 
