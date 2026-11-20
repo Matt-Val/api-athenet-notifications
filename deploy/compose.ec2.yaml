@@ -1,0 +1,33 @@
+name: athenet-notifications-ec2
+services:
+  notifications:
+    image: ${NOTIFICATIONS_IMAGE:-athenet-notifications:ec2}
+    env_file:
+      - ${NOTIFICATIONS_ENV_FILE:-.env}
+    # Primera revisión: validar el esquema sin consumir ni publicar mensajes.
+    command:
+      - --server.port=8084
+      - --spring.jpa.hibernate.ddl-auto=validate
+      - --spring.rabbitmq.listener.simple.auto-startup=false
+      - --spring.rabbitmq.dynamic=false
+      - --app.newsletter.worker-enabled=false
+      - --app.newsletter.publisher-enabled=false
+      - --app.newsletter.confirmation-publisher-enabled=false
+      - --app.newsletter.events-enabled=false
+    ports:
+      - "${NOTIFICATIONS_BIND_ADDRESS:-127.0.0.1}:8084:8084"
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    pids_limit: 256
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
