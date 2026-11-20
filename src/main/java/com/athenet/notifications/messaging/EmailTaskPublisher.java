@@ -44,7 +44,8 @@ public class EmailTaskPublisher {
             headers.setType(envelope.type());
             headers.setTimestamp(Date.from(Instant.parse(envelope.occurredAt())));
             var message = new Message(mapper.writeValueAsBytes(envelope), headers);
-            template.send(RabbitConfig.EXCHANGE, RabbitConfig.EMAIL_ROUTING_KEY, message, correlation);
+            // Al exchange direct: esto es un comando, no un evento.
+            template.send(RabbitConfig.DIRECT_EXCHANGE, RabbitConfig.EMAIL_ROUTING_KEY, message, correlation);
             var confirm = correlation.getFuture().get(properties.getPublishConfirmTimeout().toNanos(), TimeUnit.NANOSECONDS);
             // Un mensaje no enrutado también puede recibir ACK: el return debe revisarse antes de aceptar.
             if (correlation.getReturned() != null) throw new EmailPublicationException(Reason.UNROUTABLE);

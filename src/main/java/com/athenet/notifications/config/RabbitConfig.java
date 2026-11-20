@@ -21,6 +21,18 @@ public class RabbitConfig {
     public static final String QUEUE = "notificaciones.resultados";
     public static final String DLQ = QUEUE + ".dlq";
     public static final String DLX = "athenet.dlx";
+    /*
+        Exchange direct para COMANDOS. athenet.topic transporta hechos ya
+        ocurridos ("se publico un evento", "se registro un resultado"), que
+        pueden interesarle a varios consumidores y por eso se enrutan por patron.
+        Un correo no es un hecho: es una orden de trabajo con un unico
+        destinatario, y un direct enruta por coincidencia exacta de clave.
+
+        Se agrega uno nuevo en vez de cambiarle el tipo a athenet.topic o a
+        athenet.dlx: RabbitMQ no deja redeclarar un exchange con otro tipo, y el
+        resto de los microservicios fallaria al arrancar con PRECONDITION_FAILED.
+    */
+    public static final String DIRECT_EXCHANGE = "athenet.direct";
     public static final String EMAIL_ROUTING_KEY = "notificacion.email.solicitado";
     public static final String EMAIL_QUEUE = "notificaciones.correos";
     public static final String EMAIL_DLQ = EMAIL_QUEUE + ".dlq";
@@ -29,6 +41,7 @@ public class RabbitConfig {
 
     @Bean TopicExchange resultsExchange() { return new TopicExchange(EXCHANGE, true, false); }
     @Bean TopicExchange deadLetterExchange() { return new TopicExchange(DLX, true, false); }
+    @Bean DirectExchange commandsExchange() { return new DirectExchange(DIRECT_EXCHANGE, true, false); }
     @Bean Queue resultsQueue() {
         return QueueBuilder.durable(QUEUE).deadLetterExchange(DLX).deadLetterRoutingKey(DLQ).build();
     }
@@ -44,7 +57,7 @@ public class RabbitConfig {
     }
     @Bean Queue emailDlq() { return QueueBuilder.durable(EMAIL_DLQ).build(); }
     @Bean Binding emailBinding(@Qualifier("emailQueue") Queue queue,
-                              @Qualifier("resultsExchange") TopicExchange exchange) {
+                              @Qualifier("commandsExchange") DirectExchange exchange) {
         return BindingBuilder.bind(queue).to(exchange).with(EMAIL_ROUTING_KEY);
     }
     @Bean Binding emailDlqBinding(@Qualifier("emailDlq") Queue queue,
