@@ -1,0 +1,123 @@
+name: Build, Push and Deploy
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: notifications_test
+          POSTGRES_USER: notifications_user
+          POSTGRES_PASSWORD: notifications_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U notifications_user -d notifications_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      NOTIFICATIONS_DB_TEST_URL: jdbc:postgresql://localhost:5432/notifications_test
+      NOTIFICATIONS_DB_TEST_USER: notifications_user
+      NOTIFICATIONS_DB_TEST_PASSWORD: notifications_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: chmod +x mvnw && ./mvnw -B verify
+
+  build-and-push:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set Docker Hub image name
+        id: image
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          : "${DOCKERHUB_USERNAME:?Configura la variable DOCKERHUB_USERNAME}"
+          echo "name=${DOCKERHUB_USERNAME}/api-athenet-notifications" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    concurrency:
+      group: notifications-ec2-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy Compose configuration to EC2
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.EC2_APP_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: deploy/compose.ec2.yaml,deploy/compose.active.yaml
+          target: /home/${{ secrets.EC2_SSH_USER }}/api-athenet-notifications
+          overwrite: true
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image }}:${{ github.sha }}
+        with:
+          host: ${{ secrets.EC2_APP_HOST }}
+          username: ${{ secrets.EC2_SSH_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,IMAGE_REF
+          command_timeout: 10m
+          script: |
+            set -eu
+            cd "$HOME/api-athenet-notifications"
+            test -s deploy/.env
+            export NOTIFICATIONS_IMAGE="$IMAGE_REF"
+            export NOTIFICATIONS_BIND_ADDRESS=0.0.0.0
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            unset DOCKERHUB_TOKEN
+            docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml config --quiet
+            docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml pull notifications
+            docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml up -d --no-build notifications
+            for attempt in $(seq 1 30); do
+              status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                http://127.0.0.1:8084/subscriptions \
+                -H 'Content-Type: application/json' -d '{}' || true)
+              if [ "$status" = 400 ]; then
+                echo 'OK: API de Notificaciones responde HTTP 400 a la petición de validación.'
+                exit 0
+              fi
+              sleep 3
+            done
+            echo 'ERROR: la API no respondió como se esperaba tras el despliegue.' >&2
+            docker compose -f deploy/compose.ec2.yaml ps
+            exit 1

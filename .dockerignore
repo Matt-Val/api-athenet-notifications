@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+target
+**/application-local.properties
+*.pem
+*.key
+deploy
+docs
+db
+scripts

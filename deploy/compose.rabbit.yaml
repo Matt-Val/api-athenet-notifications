@@ -1,0 +1,76 @@
+# Cluster de RabbitMQ de 2 nodos para Athenet.
+#
+# La pauta exige un cluster funcional levantado con Docker Compose, no un nodo
+# suelto. Los dos nodos comparten la cookie de Erlang (es lo que les permite
+# hablarse) y rabbit2 se une a rabbit1 en su primer arranque.
+#
+# USO:
+#   cp rabbit.env.example .env   # y completar usuario, password y cookie
+#   docker compose -f compose.rabbit.yaml --env-file .env up -d
+
+name: athenet-rabbit
+
+services:
+  rabbit1:
+    image: rabbitmq:3.13-management
+    hostname: rabbit1
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER:?falta RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASS:?falta RABBIT_PASS}
+      RABBITMQ_ERLANG_COOKIE: ${RABBIT_COOKIE:?falta RABBIT_COOKIE}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbit1-data:/var/lib/rabbitmq
+      - ./rabbit-conf/10-athenet.conf:/etc/rabbitmq/conf.d/10-athenet.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 600m
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+  rabbit2:
+    image: rabbitmq:3.13-management
+    hostname: rabbit2
+    environment:
+      RABBITMQ_ERLANG_COOKIE: ${RABBIT_COOKIE:?falta RABBIT_COOKIE}
+    volumes:
+      - rabbit2-data:/var/lib/rabbitmq
+      # El tope de memoria va por archivo: la imagen 3.13 ABORTA el arranque si
+      # encuentra RABBITMQ_VM_MEMORY_HIGH_WATERMARK, que quedo obsoleta.
+      # conf.d/ es la via soportada para agregar configuracion sin pisar la que
+      # el entrypoint genera en rabbitmq.conf a partir del usuario y la password.
+      - ./rabbit-conf/10-athenet.conf:/etc/rabbitmq/conf.d/10-athenet.conf:ro
+    depends_on:
+      rabbit1:
+        condition: service_healthy
+    # Arranca en segundo plano, se une al cluster, se detiene y vuelve a
+    # arrancar en primer plano. El "join" solo hace falta la primera vez: queda
+    # grabado en el volumen, asi que en los reinicios siguientes es inofensivo.
+    command: >
+      bash -c "
+        rabbitmq-server -detached;
+        sleep 20;
+        rabbitmqctl stop_app;
+        rabbitmqctl reset;
+        rabbitmqctl join_cluster rabbit@rabbit1;
+        rabbitmqctl stop;
+        sleep 3;
+        exec rabbitmq-server
+      "
+    restart: unless-stopped
+    mem_limit: 600m
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }
+
+volumes:
+  rabbit1-data:
+  rabbit2-data:

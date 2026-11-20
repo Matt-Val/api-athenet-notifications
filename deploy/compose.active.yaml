@@ -1,0 +1,12 @@
+# Usar después de validar esquema, conexiones y productor de Eventos.
+services:
+  notifications:
+    command:
+      - --server.port=8084
+      - --spring.jpa.hibernate.ddl-auto=validate
+      - --spring.rabbitmq.listener.simple.auto-startup=true
+      - --spring.rabbitmq.dynamic=true
+      - --app.newsletter.worker-enabled=true
+      - --app.newsletter.publisher-enabled=true
+      - --app.newsletter.confirmation-publisher-enabled=true
+      - --app.newsletter.events-enabled=true

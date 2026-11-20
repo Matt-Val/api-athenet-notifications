@@ -1,0 +1,26 @@
+# Primer arranque SOLO: crea el esquema en una base vacia.
+#
+# El despliegue normal usa ddl-auto=validate, que falla si las tablas no existen,
+# y db/ no trae un script de esquema inicial (event-notifications.sql es
+# incremental sobre una base que ya tiene tablas). Asi que la primera vez se deja
+# que Hibernate las cree, con los consumidores y publicadores APAGADOS para no
+# tocar colas mientras el esquema se esta formando.
+#
+# USO (una sola vez):
+#   docker compose -f deploy/compose.ec2.yaml -f deploy/compose.init.yaml up -d
+#   docker compose -f deploy/compose.ec2.yaml logs --tail 40 notifications
+#   docker compose -f deploy/compose.ec2.yaml down
+#
+# Despues, el arranque definitivo:
+#   docker compose -f deploy/compose.ec2.yaml -f deploy/compose.active.yaml up -d
+services:
+  notifications:
+    command:
+      - --server.port=8084
+      - --spring.jpa.hibernate.ddl-auto=update
+      - --spring.rabbitmq.listener.simple.auto-startup=false
+      - --spring.rabbitmq.dynamic=false
+      - --app.newsletter.worker-enabled=false
+      - --app.newsletter.publisher-enabled=false
+      - --app.newsletter.confirmation-publisher-enabled=false
+      - --app.newsletter.events-enabled=false
